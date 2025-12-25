@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Play, Settings, Info, Skull, Shuffle, Wand2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Play, Settings, Info, Skull, Shuffle, Wand2, Download } from 'lucide-react';
 import { GameState, Deck } from './types';
 import { STATIC_DECKS, AI_DECK, COLORS } from './constants';
 import { GameScreen } from './components/GameScreen';
@@ -17,6 +17,30 @@ const App: React.FC = () => {
   // Custom AI Topic State
   const [customTopic, setCustomTopic] = useState('');
   const [showAiInput, setShowAiInput] = useState(false);
+
+  // PWA Install State
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    // Escuchar evento para instalar la app (Solo Android/Chrome Desktop)
+    const handler = (e: any) => {
+      e.preventDefault(); // Prevenir que Chrome muestre el banner automático feo
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    installPrompt.userChoice.then((choiceResult: any) => {
+      if (choiceResult.outcome === 'accepted') {
+        console.log('Usuario aceptó instalar la app');
+        setInstallPrompt(null);
+      }
+    });
+  };
 
   const startGame = async (deck: Deck, customTopicInput?: string) => {
     setIsLoading(true);
@@ -68,6 +92,17 @@ const App: React.FC = () => {
                ¡ADIVINA<br/>GÜEY!
              </h1>
              <p className="text-gray-300 mt-2 font-bold text-lg">Edición Chilanga 🇲🇽</p>
+             
+             {/* PWA Install Button (Only visible if supported/triggered) */}
+             {installPrompt && (
+               <button 
+                 onClick={handleInstallClick}
+                 className="mt-4 bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-full text-sm font-bold flex items-center justify-center gap-2 mx-auto border border-white/20 transition-all"
+               >
+                 <Download size={16} />
+                 INSTALAR APP
+               </button>
+             )}
           </div>
           {/* Decorative circles */}
           <div className="absolute top-0 left-0 w-32 h-32 bg-pink-600 rounded-full blur-3xl opacity-20 -translate-x-10 -translate-y-10"></div>
