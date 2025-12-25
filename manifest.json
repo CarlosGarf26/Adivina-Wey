@@ -1,0 +1,21 @@
+{
+  "name": "¡Adivina Güey! - Edición Chilanga",
+  "short_name": "AdivinaGüey",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#171717",
+  "theme_color": "#E4007C",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/330/330430.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/330/330430.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -4,7 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>¡Adivina Güey!</title>
-    <!-- Mantenemos Tailwind vía CDN para simplicidad, aunque en producción real se recomienda instalarlo -->
+    
+    <!-- Configuración PWA / Móvil -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#E4007C">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Configuración iOS (iPhone/iPad) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AdivinaGüey">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/330/330430.png">
+
+    <!-- Mantenemos Tailwind vía CDN para simplicidad -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Bangers&display=swap" rel="stylesheet">
     <style>
