@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SensorStatus } from '../types';
-import { X, Check, Smartphone, Info } from 'lucide-react';
+import { X, Check, Smartphone, Info, ArrowUp, ThumbsUp, ArrowDown, ThumbsDown } from 'lucide-react';
 
 interface GameScreenProps {
   words: string[];
@@ -25,11 +25,12 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
   
   // Sensor State
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>(SensorStatus.UNKNOWN);
-  const [debugValues, setDebugValues] = useState({ beta: 0 });
+  const [debugValues, setDebugValues] = useState({ beta: 0, ready: false });
   const [showDebug, setShowDebug] = useState(false);
   
-  // Ref para evitar detecciones múltiples muy rápidas
+  // Logic Flags
   const processingRef = useRef(false);
+  const isReadyRef = useRef(false); // Flag para saber si el usuario regresó a la posición neutral (vertical)
 
   // --------------------------------------------------------------------------
   // SENSOR LOGIC (Gyroscope)
@@ -60,26 +61,35 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
     if (sensorStatus !== SensorStatus.GRANTED) return;
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
-      // Si el juego está pausado, terminando, o procesando un movimiento anterior, ignorar.
       if (isPaused || processingRef.current || !isPlaying) return;
 
-      // BETA: Inclinación Frontal/Trasera (-180 a 180)
-      // Asumiendo modo Portrait (que es como se renderiza el texto rotado)
-      // 90 grados = Vertical (Frente)
-      // < 30 grados = Mirando al techo (Correcto)
-      // > 150 grados = Mirando al piso (Pasar)
-      const beta = event.beta || 90; 
-      
-      setDebugValues({ beta: Math.round(beta) });
+      const beta = event.beta; 
+      if (beta === null) return;
 
-      // Detectar CORRECTO (Inclinar hacia atrás/techo)
+      // ZONA NEUTRAL (Vertical / Frente)
+      // El celular debe estar entre 60° y 120° para "armar" el gatillo.
+      // Esto evita que si el cel está en la mesa (0°), marque correcto infinito.
+      if (beta > 60 && beta < 120) {
+        isReadyRef.current = true;
+      }
+      
+      setDebugValues({ beta: Math.round(beta), ready: isReadyRef.current });
+
+      // Si no estamos listos (no hemos pasado por la vertical), ignoramos movimientos extremos
+      if (!isReadyRef.current) return;
+
+      // ACCIÓN: CORRECTO (Inclinar hacia atrás/arriba)
+      // Beta tiende a 0 o negativo cuando miras al techo
       if (beta < 35) {
          triggerAction('CORRECT');
+         isReadyRef.current = false; // Reset: debe volver a neutral
       }
 
-      // Detectar PASAR (Inclinar hacia adelante/piso)
+      // ACCIÓN: PASAR (Inclinar hacia adelante/abajo)
+      // Beta tiende a 180 cuando miras al piso
       if (beta > 145) {
          triggerAction('SKIP');
+         isReadyRef.current = false; // Reset: debe volver a neutral
       }
     };
 
@@ -97,10 +107,10 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
         handleSkip();
     }
 
-    // Cooldown de 1.5 segundos para dar tiempo al usuario de regresar el cel a la frente
+    // Cooldown
     setTimeout(() => {
         processingRef.current = false;
-    }, 1500);
+    }, 1000);
   };
 
   // --------------------------------------------------------------------------
@@ -185,26 +195,33 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
           {countdown}
         </div>
         
-        <p className="text-white text-xl font-bold mb-8 bg-black/20 p-4 rounded-xl">
-          Inclina al TECHO para BIEN 👍<br/>
-          Inclina al PISO para PASAR 👎
-        </p>
+        <div className="bg-black/20 p-6 rounded-2xl flex flex-col gap-6 w-full max-w-sm">
+           <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-xl">
+                 <ArrowUp size={32} className="text-green-400" /> 
+                 <span>ARRIBA</span>
+              </div>
+              <ThumbsUp size={32} className="text-green-400" />
+           </div>
+           <div className="h-px bg-white/20"></div>
+           <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-xl">
+                 <ArrowDown size={32} className="text-red-400" /> 
+                 <span>ABAJO</span>
+              </div>
+              <ThumbsDown size={32} className="text-red-400" />
+           </div>
+        </div>
         
         {/* SENSOR BUTTON */}
         {sensorStatus !== SensorStatus.GRANTED && (
            <button 
              onClick={requestMotionPermission}
-             className="bg-white text-blue-600 px-8 py-4 rounded-2xl font-bold shadow-xl flex items-center gap-3 text-xl animate-pulse mx-auto"
+             className="mt-8 bg-white text-blue-600 px-8 py-4 rounded-2xl font-bold shadow-xl flex items-center gap-3 text-xl animate-pulse mx-auto"
            >
              <Smartphone size={32} />
              ACTIVAR JUEGO
            </button>
-        )}
-
-        {sensorStatus === SensorStatus.GRANTED && (
-          <div className="flex items-center justify-center gap-2 text-green-300 bg-black/20 px-4 py-2 rounded-full mx-auto w-fit">
-            <Check size={20} /> Listo
-          </div>
         )}
       </div>
     );
@@ -233,6 +250,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
         <div className="absolute top-20 left-4 text-xs font-mono text-white/50 pointer-events-none z-50 bg-black/40 p-2 rounded">
           Status: {sensorStatus}<br/>
           Beta: {debugValues.beta}°<br/>
+          Ready: {debugValues.ready ? 'YES' : 'NO'}
         </div>
       )}
 
@@ -241,25 +259,34 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
         <div className={`w-full max-w-md aspect-[3/4] md:aspect-video flex items-center justify-center 
                         ${feedback ? 'scale-90 opacity-0' : 'scale-100 opacity-100'} 
                         transition-all duration-300`}>
-          <div className="text-center transform rotate-90 md:rotate-0">
-             <h2 className="text-6xl md:text-8xl font-display font-bold text-white drop-shadow-lg leading-none break-words px-4">
+          <div className="text-center transform rotate-90 md:rotate-0 flex flex-col items-center">
+             <h2 className="text-6xl md:text-8xl font-display font-bold text-white drop-shadow-lg leading-none break-words px-4 mb-12">
                {currentWord}
              </h2>
-             <p className="text-white/60 mt-8 text-xl font-bold animate-pulse">
-               TECHO = 👍  |  PISO = 👎
-             </p>
+             
+             {/* Visual Guides */}
+             <div className="flex gap-12 opacity-60">
+                <div className="flex flex-col items-center gap-2 animate-bounce">
+                    <ArrowUp size={40} />
+                    <ThumbsUp size={40} />
+                </div>
+                <div className="flex flex-col items-center gap-2 animate-bounce">
+                    <ThumbsDown size={40} />
+                    <ArrowDown size={40} />
+                </div>
+             </div>
           </div>
         </div>
 
         {/* Feedback Icons */}
         {feedback === 'CORRECT' && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-            <Check size={180} className="text-white drop-shadow-lg animate-pop" />
+            <ThumbsUp size={180} className="text-white drop-shadow-lg animate-pop" />
           </div>
         )}
         {feedback === 'SKIP' && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-             <X size={180} className="text-white drop-shadow-lg animate-pop" />
+             <ThumbsDown size={180} className="text-white drop-shadow-lg animate-pop" />
           </div>
         )}
       </div>
