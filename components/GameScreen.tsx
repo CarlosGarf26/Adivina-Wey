@@ -10,7 +10,7 @@ interface GameScreenProps {
   onExit: () => void;
 }
 
-export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerName, onEndGame, onExit }) => {
+export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGame, onExit }) => {
   // Game State
   const [timeLeft, setTimeLeft] = useState(duration);
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
@@ -25,13 +25,11 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
   
   // Sensor State
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>(SensorStatus.UNKNOWN);
-  const [debugValues, setDebugValues] = useState({ beta: 0, gamma: 0 });
+  const [debugValues, setDebugValues] = useState({ beta: 0 });
   const [showDebug, setShowDebug] = useState(false);
   
-  // Sensor Locking (Zona Neutral)
-  // true = El sensor está listo para detectar.
-  // false = El usuario debe regresar el celular a la frente (vertical) para desbloquear.
-  const isSensorReadyRef = useRef(false);
+  // Ref para evitar detecciones múltiples muy rápidas
+  const processingRef = useRef(false);
 
   // --------------------------------------------------------------------------
   // SENSOR LOGIC (Gyroscope)
@@ -62,77 +60,72 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
     if (sensorStatus !== SensorStatus.GRANTED) return;
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
-      if (isPaused || feedback) return;
+      // Si el juego está pausado, terminando, o procesando un movimiento anterior, ignorar.
+      if (isPaused || processingRef.current || !isPlaying) return;
 
       // BETA: Inclinación Frontal/Trasera (-180 a 180)
-      // Vertical (Frente): ~90 grados
-      // Acostado (Mirando techo/Arriba): ~0 grados
-      // Acostado (Mirando piso/Abajo): ~180 grados
-      const beta = event.beta || 0; 
-      const gamma = event.gamma || 0;
-
-      setDebugValues({ beta: Math.round(beta), gamma: Math.round(gamma) });
-
-      // 1. ZONA NEUTRAL (RESET)
-      // El usuario debe poner el celular vertical (aprox 90 grados) para poder marcar la siguiente.
-      // Rango vertical aceptable: 60 a 120 grados.
-      if (beta > 60 && beta < 120) {
-        isSensorReadyRef.current = true;
-      }
-
-      // Si el sensor no se ha reseteado (no ha vuelto a la frente), ignoramos movimientos.
-      if (!isSensorReadyRef.current) return;
-
-      // 2. DETECTAR MOVIMIENTOS
+      // Asumiendo modo Portrait (que es como se renderiza el texto rotado)
+      // 90 grados = Vertical (Frente)
+      // < 30 grados = Mirando al techo (Correcto)
+      // > 150 grados = Mirando al piso (Pasar)
+      const beta = event.beta || 90; 
       
-      // ARRIBA (Mirar al techo) = CORRECTO
-      // El valor de Beta baja hacia 0.
-      // Umbral: Menor a 40 grados.
-      if (beta < 40) {
-         handleCorrect();
-         isSensorReadyRef.current = false; // Bloquear hasta volver a neutral
+      setDebugValues({ beta: Math.round(beta) });
+
+      // Detectar CORRECTO (Inclinar hacia atrás/techo)
+      if (beta < 35) {
+         triggerAction('CORRECT');
       }
 
-      // ABAJO (Mirar al piso) = PASAR / ERROR
-      // El valor de Beta sube hacia 180.
-      // Umbral: Mayor a 140 grados.
-      if (beta > 140) {
-         handleSkip();
-         isSensorReadyRef.current = false; // Bloquear hasta volver a neutral
+      // Detectar PASAR (Inclinar hacia adelante/piso)
+      if (beta > 145) {
+         triggerAction('SKIP');
       }
     };
 
     window.addEventListener('deviceorientation', handleOrientation);
     return () => window.removeEventListener('deviceorientation', handleOrientation);
-  }, [sensorStatus, isPaused, feedback]);
+  }, [sensorStatus, isPaused, isPlaying]);
+
+  const triggerAction = (type: 'CORRECT' | 'SKIP') => {
+    if (processingRef.current) return;
+    processingRef.current = true;
+
+    if (type === 'CORRECT') {
+        handleCorrect();
+    } else {
+        handleSkip();
+    }
+
+    // Cooldown de 1.5 segundos para dar tiempo al usuario de regresar el cel a la frente
+    setTimeout(() => {
+        processingRef.current = false;
+    }, 1500);
+  };
 
   // --------------------------------------------------------------------------
   // GAME LOGIC
   // --------------------------------------------------------------------------
 
   const handleCorrect = useCallback(() => {
-    if (feedback) return;
-    
     setFeedback('CORRECT');
-    if (navigator.vibrate) navigator.vibrate([50, 50, 50]); // Vibración corta y feliz
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50]); 
 
     setTimeout(() => {
       setCorrectWords(prev => [...prev, words[currentWordIndex]]);
       advanceCard();
-    }, 1000); // 1 segundo para ver el feedback
-  }, [feedback, words, currentWordIndex]);
+    }, 800); 
+  }, [words, currentWordIndex]);
 
   const handleSkip = useCallback(() => {
-    if (feedback) return;
-
     setFeedback('SKIP');
-    if (navigator.vibrate) navigator.vibrate(500); // Vibración larga y triste
+    if (navigator.vibrate) navigator.vibrate(500); 
 
     setTimeout(() => {
       setSkippedWords(prev => [...prev, words[currentWordIndex]]);
       advanceCard();
-    }, 1000);
-  }, [feedback, words, currentWordIndex]);
+    }, 800);
+  }, [words, currentWordIndex]);
 
   const advanceCard = () => {
     setFeedback(null);
@@ -186,17 +179,15 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
   if (countdown > 0) {
     return (
       <div className="fixed inset-0 bg-blue-600 flex flex-col items-center justify-center z-50 p-4 text-center">
-        <h2 className="text-white text-3xl font-display mb-4">Turno de:</h2>
-        <h1 className="text-5xl text-yellow-300 font-display font-bold mb-8 drop-shadow-md">{playerName}</h1>
+        <h2 className="text-white text-3xl font-display mb-4">¡Ponte el cel en la frente!</h2>
         
         <div className="text-9xl font-display font-bold text-white animate-bounce mb-8">
           {countdown}
         </div>
         
         <p className="text-white text-xl font-bold mb-8 bg-black/20 p-4 rounded-xl">
-          1. Celular en la frente (Horizontal)<br/>
-          2. Inclina al TECHO para CORRECTO<br/>
-          3. Inclina al PISO para PASAR
+          Inclina al TECHO para BIEN 👍<br/>
+          Inclina al PISO para PASAR 👎
         </p>
         
         {/* SENSOR BUTTON */}
@@ -206,13 +197,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
              className="bg-white text-blue-600 px-8 py-4 rounded-2xl font-bold shadow-xl flex items-center gap-3 text-xl animate-pulse mx-auto"
            >
              <Smartphone size={32} />
-             ACTIVAR SENSORES
+             ACTIVAR JUEGO
            </button>
         )}
 
         {sensorStatus === SensorStatus.GRANTED && (
           <div className="flex items-center justify-center gap-2 text-green-300 bg-black/20 px-4 py-2 rounded-full mx-auto w-fit">
-            <Check size={20} /> Sensores Calibrados
+            <Check size={20} /> Listo
           </div>
         )}
       </div>
@@ -231,11 +222,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
          <button onClick={onExit} className="bg-black/20 p-2 rounded-full text-white backdrop-blur-sm">
            <X size={24} />
          </button>
-         <div className="flex flex-col items-center">
-            <div className="text-5xl font-display font-bold text-white tracking-widest drop-shadow-md">
-              {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
-            </div>
-            <span className="text-white/60 text-sm font-bold">{playerName}</span>
+         <div className="text-6xl font-display font-bold text-white tracking-widest drop-shadow-md">
+            {timeLeft}
          </div>
          <div className="w-10"></div>
       </div>
@@ -245,8 +233,6 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
         <div className="absolute top-20 left-4 text-xs font-mono text-white/50 pointer-events-none z-50 bg-black/40 p-2 rounded">
           Status: {sensorStatus}<br/>
           Beta: {debugValues.beta}°<br/>
-          Gamma: {debugValues.gamma}°<br/>
-          Ready: {isSensorReadyRef.current ? 'YES' : 'NO (Return to vertical)'}
         </div>
       )}
 
@@ -259,8 +245,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
              <h2 className="text-6xl md:text-8xl font-display font-bold text-white drop-shadow-lg leading-none break-words px-4">
                {currentWord}
              </h2>
-             <p className="text-white/60 mt-8 text-2xl font-bold animate-pulse">
-               TECHO = BIEN 👍 <br/> PISO = PASAR 👎
+             <p className="text-white/60 mt-8 text-xl font-bold animate-pulse">
+               TECHO = 👍  |  PISO = 👎
              </p>
           </div>
         </div>
@@ -278,19 +264,19 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, playerN
         )}
       </div>
 
-      {/* Touch Controls (Backups) */}
+      {/* Touch Controls (Backup Manual) */}
       <div className="absolute inset-0 flex z-0">
         <div 
-          onClick={handleSkip} 
+          onClick={() => triggerAction('SKIP')} 
           className="w-1/2 h-full active:bg-red-600/20 transition-colors"
         ></div>
         <div 
-          onClick={handleCorrect} 
+          onClick={() => triggerAction('CORRECT')} 
           className="w-1/2 h-full active:bg-green-600/20 transition-colors"
         ></div>
       </div>
       
-      {/* Botón de Debug secreto */}
+      {/* Botón de Debug secreto (Abajo a la izquierda) */}
        <button 
           onClick={() => setShowDebug(!showDebug)} 
           className="absolute bottom-4 left-4 text-white/10 p-4 z-50"
