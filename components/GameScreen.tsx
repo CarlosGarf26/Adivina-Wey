@@ -70,12 +70,6 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
       // LOGIC FOR LANDSCAPE MODE (Celular horizontal en la frente)
       // En la frente (pantalla afuera): Gamma es aprox +/- 90, Beta aprox 0.
       
-      // TILT DOWN (Hacia el piso) -> CORRECTO
-      // Cuando bajas la cabeza, el Gamma absoluto disminuye (se acerca a 0, plano)
-      // O el Beta cambia significativamente dependiendo de la rotación exacta.
-      
-      // Vamos a usar una lógica simplificada basada en umbrales:
-      
       // Detectar "Neutro" (En la frente)
       // Asumimos que el usuario regresa a posición vertical entre palabras.
       // Gamma alto (> 60 o < -60) significa que está vertical en la frente.
@@ -85,20 +79,17 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
 
       if (isTiltLockedRef.current) return;
 
-      // DETECTAR CORRECTO (Agachar cabeza / Celular mira al piso)
+      // DETECTAR ABAJO (Mirar al piso) -> AHORA ES "PASAR"
       // El celular se pone más "plano", Gamma baja.
       if (Math.abs(gamma) < 30 && Math.abs(beta) < 50) {
-         handleCorrect();
+         handleSkip(); // Invertido: Abajo es Pasar
          isTiltLockedRef.current = true;
       }
 
-      // DETECTAR PASAR (Mirar al techo / Celular mira arriba)
-      // Esto es difícil anatómicamente con el celular en la frente en landscape.
-      // Alternativa: Inclinar hacia atrás bruscamente.
-      // Si el Gamma invierte polaridad o Beta sube mucho.
+      // DETECTAR ARRIBA (Mirar al techo) -> AHORA ES "CORRECTO"
       // Simplificación: Si Beta > 60 (mirando arriba)
       if (Math.abs(beta) > 60) {
-        handleSkip();
+        handleCorrect(); // Invertido: Arriba es Correcto
         isTiltLockedRef.current = true;
       }
     };
@@ -265,8 +256,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
              <h2 className="text-6xl md:text-8xl font-display font-bold text-white drop-shadow-lg leading-none break-words px-4">
                {currentWord}
              </h2>
+             {/* Actualización de Instrucciones Visuales */}
              <p className="text-white/60 mt-6 text-xl font-bold animate-pulse">
-               ABAJO: Correcto &bull; ARRIBA: Pasar
+               ARRIBA: Correcto &bull; ABAJO: Pasar
              </p>
           </div>
         </div>
