@@ -234,7 +234,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
   const currentWord = words[currentWordIndex];
 
   return (
-    <div className={`fixed inset-0 ${bgClass} transition-colors duration-300 flex flex-col z-40 overflow-hidden`}>
+    <div className={`fixed inset-0 ${bgClass} transition-colors duration-300 flex flex-col z-40 overflow-hidden touch-none`}>
       
       {/* Top Bar */}
       <div className="flex justify-between items-center p-4 relative z-50">
