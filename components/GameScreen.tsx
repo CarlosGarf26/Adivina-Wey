@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { GameSession, SensorStatus } from '../types';
-import { X, Check, RotateCcw, Smartphone } from 'lucide-react';
+import { SensorStatus } from '../types';
+import { X, Check, Smartphone, Info } from 'lucide-react';
 
 interface GameScreenProps {
   words: string[];
@@ -16,96 +16,22 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
   const [correctWords, setCorrectWords] = useState<string[]>([]);
   const [skippedWords, setSkippedWords] = useState<string[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [countdown, setCountdown] = useState(3);
+  const [countdown, setCountdown] = useState(5); // Increased countdown to give time for setup
+  const [isPaused, setIsPaused] = useState(false);
   
   // Feedback State
   const [feedback, setFeedback] = useState<'CORRECT' | 'SKIP' | null>(null);
   
   // Sensor State
   const [sensorStatus, setSensorStatus] = useState<SensorStatus>(SensorStatus.UNKNOWN);
-  const lastTiltRef = useRef<number>(0);
-  const processingTiltRef = useRef<boolean>(false);
-
-  // Audio refs (optional placeholders for now)
-  const correctSound = useRef<HTMLAudioElement | null>(null);
-  const skipSound = useRef<HTMLAudioElement | null>(null);
-
-  // --------------------------------------------------------------------------
-  // GAME LOGIC
-  // --------------------------------------------------------------------------
-
-  const handleCorrect = useCallback(() => {
-    if (!isPlaying || feedback) return;
-    
-    setFeedback('CORRECT');
-    // Haptic feedback
-    if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
-
-    setTimeout(() => {
-      setCorrectWords(prev => [...prev, words[currentWordIndex]]);
-      advanceCard();
-    }, 600);
-  }, [isPlaying, feedback, words, currentWordIndex]);
-
-  const handleSkip = useCallback(() => {
-    if (!isPlaying || feedback) return;
-
-    setFeedback('SKIP');
-    if (navigator.vibrate) navigator.vibrate(200);
-
-    setTimeout(() => {
-      setSkippedWords(prev => [...prev, words[currentWordIndex]]);
-      advanceCard();
-    }, 600);
-  }, [isPlaying, feedback, words, currentWordIndex]);
-
-  const advanceCard = () => {
-    setFeedback(null);
-    if (currentWordIndex >= words.length - 1) {
-      // End game early if run out of words
-      endGame();
-    } else {
-      setCurrentWordIndex(prev => prev + 1);
-    }
-  };
-
-  const endGame = useCallback(() => {
-    setIsPlaying(false);
-    onEndGame(correctWords, skippedWords);
-  }, [correctWords, skippedWords, onEndGame]);
+  const [debugValues, setDebugValues] = useState({ beta: 0, gamma: 0 });
+  const [showDebug, setShowDebug] = useState(false);
+  
+  // Tilt Locking (prevent double triggers)
+  const isTiltLockedRef = useRef(false);
 
   // --------------------------------------------------------------------------
-  // TIMERS
-  // --------------------------------------------------------------------------
-
-  // Initial Countdown
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
-      return () => clearTimeout(timer);
-    } else {
-      setIsPlaying(true);
-    }
-  }, [countdown]);
-
-  // Game Timer
-  useEffect(() => {
-    if (!isPlaying) return;
-    
-    if (timeLeft <= 0) {
-      endGame();
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setTimeLeft(t => t - 1);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isPlaying, timeLeft, endGame]);
-
-  // --------------------------------------------------------------------------
-  // SENSORS (Gyroscope)
+  // SENSOR LOGIC (Gyroscope)
   // --------------------------------------------------------------------------
   
   const requestMotionPermission = async () => {
@@ -118,92 +44,192 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
           setSensorStatus(SensorStatus.GRANTED);
         } else {
           setSensorStatus(SensorStatus.DENIED);
+          alert("Permiso denegado. Tendrás que jugar tocando la pantalla.");
         }
       } catch (e) {
         console.error(e);
         setSensorStatus(SensorStatus.DENIED);
       }
     } else {
-      // Non-iOS or older devices usually don't need permission request, just listen
+      // Non-iOS or older devices
       setSensorStatus(SensorStatus.GRANTED);
     }
   };
 
   useEffect(() => {
-    if (sensorStatus !== SensorStatus.GRANTED || !isPlaying) return;
+    if (sensorStatus !== SensorStatus.GRANTED) return;
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
-      if (processingTiltRef.current || feedback) return;
+      if (isPaused || feedback) return;
 
-      const gamma = event.gamma; // Left/Right tilt (-90 to 90)
-      const beta = event.beta;   // Front/Back tilt (-180 to 180)
+      const beta = event.beta || 0;   // Front/Back tilt (-180 to 180)
+      const gamma = event.gamma || 0; // Left/Right tilt (-90 to 90)
 
-      // Logic: 
-      // If phone is on forehead (Landscape mode usually):
-      // Beta is roughly near 0 or 180 depending on orientation.
-      // Gamma handles the "dip".
+      setDebugValues({ beta: Math.round(beta), gamma: Math.round(gamma) });
+
+      // LOGIC FOR LANDSCAPE MODE (Celular horizontal en la frente)
+      // En la frente (pantalla afuera): Gamma es aprox +/- 90, Beta aprox 0.
       
-      // Let's assume the user holds the phone in PORTRAIT mode against forehead for this web app.
-      // In Portrait: 
-      // Beta (Front/Back): Upright is ~90. Flat on back is 0. 
-      // Forehead position: Screen facing OUT. 
-      // Tilt DOWN (Correct): Gamma moves? No. 
-      // Actually, relying on orientation in a web app across devices is very flaky.
+      // TILT DOWN (Hacia el piso) -> CORRECTO
+      // Cuando bajas la cabeza, el Gamma absoluto disminuye (se acerca a 0, plano)
+      // O el Beta cambia significativamente dependiendo de la rotación exacta.
       
-      // ALTERNATIVE: SIMULATED GYRO LOGIC (Simplified)
-      // If we are in Landscape:
-      // Tilt DOWN (Screen towards floor) -> Correct
-      // Tilt UP (Screen towards sky) -> Skip
+      // Vamos a usar una lógica simplificada basada en umbrales:
       
-      // Thresholds
-      const TILT_THRESHOLD = 35; 
-      
-      // Detecting "Node" down (Correct) or Up (Skip)
-      // Assuming device is held Landscape. Gamma is the main factor.
-      
-      if (gamma && Math.abs(gamma) > TILT_THRESHOLD) {
-         // This is tricky without testing on device. 
-         // Let's stick to a safer logic or purely touch if sensors fail.
-         // However, I will implement a basic check.
-         
-         // Landscape Left:
-         // Gamma < -35 (Tilt away/up), Gamma > 35 (Tilt towards/down)
-         // Not reliable without calibration.
+      // Detectar "Neutro" (En la frente)
+      // Asumimos que el usuario regresa a posición vertical entre palabras.
+      // Gamma alto (> 60 o < -60) significa que está vertical en la frente.
+      if (Math.abs(gamma) > 60) {
+        isTiltLockedRef.current = false;
+      }
+
+      if (isTiltLockedRef.current) return;
+
+      // DETECTAR CORRECTO (Agachar cabeza / Celular mira al piso)
+      // El celular se pone más "plano", Gamma baja.
+      if (Math.abs(gamma) < 30 && Math.abs(beta) < 50) {
+         handleCorrect();
+         isTiltLockedRef.current = true;
+      }
+
+      // DETECTAR PASAR (Mirar al techo / Celular mira arriba)
+      // Esto es difícil anatómicamente con el celular en la frente en landscape.
+      // Alternativa: Inclinar hacia atrás bruscamente.
+      // Si el Gamma invierte polaridad o Beta sube mucho.
+      // Simplificación: Si Beta > 60 (mirando arriba)
+      if (Math.abs(beta) > 60) {
+        handleSkip();
+        isTiltLockedRef.current = true;
       }
     };
 
     window.addEventListener('deviceorientation', handleOrientation);
     return () => window.removeEventListener('deviceorientation', handleOrientation);
-  }, [sensorStatus, isPlaying, feedback]);
+  }, [sensorStatus, isPaused, feedback]);
+
+  // --------------------------------------------------------------------------
+  // GAME LOGIC
+  // --------------------------------------------------------------------------
+
+  const handleCorrect = useCallback(() => {
+    if (feedback) return;
+    
+    setFeedback('CORRECT');
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
+
+    setTimeout(() => {
+      setCorrectWords(prev => [...prev, words[currentWordIndex]]);
+      advanceCard();
+    }, 800);
+  }, [feedback, words, currentWordIndex]);
+
+  const handleSkip = useCallback(() => {
+    if (feedback) return;
+
+    setFeedback('SKIP');
+    if (navigator.vibrate) navigator.vibrate(200);
+
+    setTimeout(() => {
+      setSkippedWords(prev => [...prev, words[currentWordIndex]]);
+      advanceCard();
+    }, 800);
+  }, [feedback, words, currentWordIndex]);
+
+  const advanceCard = () => {
+    setFeedback(null);
+    if (currentWordIndex >= words.length - 1) {
+      endGame();
+    } else {
+      setCurrentWordIndex(prev => prev + 1);
+      // Small pause before unlocking sensors again is handled by the threshold check in handleOrientation
+    }
+  };
+
+  const endGame = useCallback(() => {
+    setIsPaused(true);
+    onEndGame(correctWords, skippedWords);
+  }, [correctWords, skippedWords, onEndGame]);
+
+  // --------------------------------------------------------------------------
+  // TIMERS
+  // --------------------------------------------------------------------------
+
+  useEffect(() => {
+    let timer: any;
+    if (countdown > 0) {
+      // Don't count down if we need permission and haven't asked properly yet, 
+      // BUT we want to let them click the button. 
+      // Let's just count down but stay at 1 if they haven't decided? 
+      // No, let's simple pause countdown logic if sensor is unknown? 
+      // Actually, user might want to play without sensors.
+      timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+    } else {
+      setIsPlaying(true);
+    }
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  useEffect(() => {
+    if (!isPlaying || isPaused) return;
+    
+    if (timeLeft <= 0) {
+      endGame();
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setTimeLeft(t => t - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isPlaying, timeLeft, isPaused, endGame]);
 
 
   // --------------------------------------------------------------------------
   // RENDER
   // --------------------------------------------------------------------------
 
-  // Render Countdown
+  // SETUP / COUNTDOWN SCREEN
   if (countdown > 0) {
     return (
-      <div className="fixed inset-0 bg-blue-600 flex flex-col items-center justify-center z-50">
-        <h1 className="text-9xl font-display font-bold text-white animate-bounce">
+      <div className="fixed inset-0 bg-blue-600 flex flex-col items-center justify-center z-50 p-4">
+        <h1 className="text-9xl font-display font-bold text-white animate-bounce mb-8">
           {countdown}
         </h1>
-        <p className="text-white text-xl mt-4 font-bold">¡Ponte el cel en la frente!</p>
         
-        {sensorStatus === SensorStatus.UNKNOWN && (
+        <p className="text-white text-2xl text-center font-bold mb-8">
+          ¡Ponte el cel en la frente!<br/>
+          <span className="text-sm font-normal opacity-80">(Horizontal)</span>
+        </p>
+        
+        {/* SENSOR BUTTON - CRITICAL FOR IOS */}
+        {sensorStatus !== SensorStatus.GRANTED && (
            <button 
              onClick={requestMotionPermission}
-             className="mt-8 bg-white text-blue-600 px-6 py-3 rounded-full font-bold shadow-lg"
+             className="bg-white text-blue-600 px-8 py-4 rounded-2xl font-bold shadow-xl flex items-center gap-3 text-xl animate-pulse"
            >
-             <Smartphone className="inline mr-2" />
-             Activar Sensores (Opcional)
+             <Smartphone size={32} />
+             ACTIVAR SENSORES
            </button>
         )}
+
+        {sensorStatus === SensorStatus.GRANTED && (
+          <div className="flex items-center gap-2 text-green-300 bg-black/20 px-4 py-2 rounded-full">
+            <Check size={20} /> Sensores Listos
+          </div>
+        )}
+
+        <button 
+          onClick={() => setShowDebug(!showDebug)} 
+          className="absolute top-4 right-4 text-white/30 p-2"
+        >
+          <Info size={20} />
+        </button>
       </div>
     );
   }
 
-  // Render Game
+  // GAME SCREEN
   const bgClass = feedback === 'CORRECT' ? 'bg-green-500' : feedback === 'SKIP' ? 'bg-red-500' : 'bg-blue-600';
   const currentWord = words[currentWordIndex];
 
@@ -211,72 +237,69 @@ export const GameScreen: React.FC<GameScreenProps> = ({ words, duration, onEndGa
     <div className={`fixed inset-0 ${bgClass} transition-colors duration-300 flex flex-col z-40 overflow-hidden`}>
       
       {/* Top Bar */}
-      <div className="flex justify-between items-center p-4">
+      <div className="flex justify-between items-center p-4 relative z-50">
          <button onClick={onExit} className="bg-black/20 p-2 rounded-full text-white backdrop-blur-sm">
            <X size={24} />
          </button>
-         <div className="text-4xl font-display font-bold text-white tracking-widest">
+         <div className="text-5xl font-display font-bold text-white tracking-widest drop-shadow-md">
            {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
          </div>
-         <div className="w-10"></div> {/* Spacer */}
+         <div className="w-10"></div>
       </div>
+
+      {/* Debug Overlay */}
+      {showDebug && (
+        <div className="absolute top-20 left-4 text-xs font-mono text-white/50 pointer-events-none z-50 bg-black/40 p-2 rounded">
+          Status: {sensorStatus}<br/>
+          Beta: {debugValues.beta}°<br/>
+          Gamma: {debugValues.gamma}°
+        </div>
+      )}
 
       {/* Main Card Area */}
       <div className="flex-1 flex items-center justify-center relative p-4">
         <div className={`w-full max-w-md aspect-[3/4] md:aspect-video flex items-center justify-center 
                         ${feedback ? 'scale-90 opacity-0' : 'scale-100 opacity-100'} 
                         transition-all duration-300`}>
-          <div className="text-center">
-             <h2 className="text-5xl md:text-7xl font-display font-bold text-white drop-shadow-md leading-tight break-words">
+          <div className="text-center transform rotate-90 md:rotate-0"> {/* Rotate text on mobile if locked portrait, optional */}
+             <h2 className="text-6xl md:text-8xl font-display font-bold text-white drop-shadow-lg leading-none break-words px-4">
                {currentWord}
              </h2>
-             <p className="text-white/60 mt-4 text-lg font-medium animate-pulse">
-               ¡Inclina o Toca!
+             <p className="text-white/60 mt-6 text-xl font-bold animate-pulse">
+               ABAJO: Correcto &bull; ARRIBA: Pasar
              </p>
           </div>
         </div>
 
-        {/* Feedback Overlays */}
+        {/* Feedback Icons */}
         {feedback === 'CORRECT' && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Check size={120} className="text-white animate-pop" />
-            <span className="absolute mt-40 text-4xl font-display text-white">¡ESO!</span>
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <Check size={180} className="text-white drop-shadow-lg animate-pop" />
           </div>
         )}
         {feedback === 'SKIP' && (
-          <div className="absolute inset-0 flex items-center justify-center">
-             <X size={120} className="text-white animate-pop" />
-             <span className="absolute mt-40 text-4xl font-display text-white">PASAR</span>
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+             <X size={180} className="text-white drop-shadow-lg animate-pop" />
           </div>
         )}
       </div>
 
-      {/* Touch Controls (Invisible Overlay split in half or Visible Buttons) */}
-      {/* Since holding on forehead makes precise touch hard, we make BIG zones */}
-      <div className="absolute inset-0 flex z-50 pointer-events-auto">
+      {/* Touch Controls (Huge Invisible Buttons) */}
+      <div className="absolute inset-0 flex z-0">
         <div 
           onClick={handleSkip} 
-          className="w-1/2 h-full active:bg-white/10 transition-colors flex items-center justify-start pl-4 opacity-50 hover:opacity-100"
+          className="w-1/2 h-full active:bg-red-600/20 transition-colors flex items-center justify-start pl-4"
         >
-          {/* Visual Hint Left */}
-          <div className="bg-red-500/80 p-6 rounded-full ml-4 border-4 border-white transform -rotate-90 md:rotate-0">
-             <X size={40} className="text-white" />
-          </div>
         </div>
         <div 
           onClick={handleCorrect} 
-          className="w-1/2 h-full active:bg-white/10 transition-colors flex items-center justify-end pr-4 opacity-50 hover:opacity-100"
+          className="w-1/2 h-full active:bg-green-600/20 transition-colors flex items-center justify-end pr-4"
         >
-          {/* Visual Hint Right */}
-          <div className="bg-green-500/80 p-6 rounded-full mr-4 border-4 border-white transform rotate-90 md:rotate-0">
-             <Check size={40} className="text-white" />
-          </div>
         </div>
       </div>
-      
-      {/* Explanation Text at bottom (inverted for user looking at screen?) No, normally for friends. */}
-      <div className="absolute bottom-10 w-full text-center pointer-events-none text-white/40 text-sm font-bold">
-        IZQUIERDA: PASAR &nbsp;&bull;&nbsp; DERECHA: CORRECTO
+
+      <div className="absolute bottom-4 w-full text-center pointer-events-none text-white/50 text-xs font-bold uppercase tracking-widest z-50">
+        Si no jala el sensor, toca: Izquierda (Pasar) - Derecha (Bien)
       </div>
 
     </div>
